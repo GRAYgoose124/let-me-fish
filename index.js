@@ -1,7 +1,7 @@
 const	ACTION_DELAY_THROW_ROD	= [2000, 3000],		// [Min, Max] in ms, 1000 ms = 1 sec
-		ACTION_DELAY_FISH_START	= [1000, 2000],		// [Min, Max] - the pressing of F button to reel and start the minigame
-		ACTION_DELAY_FISH_CATCH	= [2000, 2500],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
-		DELAY_BASED_ON_FISH_TIER= false; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
+	  	ACTION_DELAY_FISH_START	= [1000, 2000],		// [Min, Max] - the pressing of F button to reel and start the minigame
+	  	ACTION_DELAY_FISH_CATCH	= [2000, 2500],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
+		  DELAY_BASED_ON_FISH_TIER = false; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
 
 const path = require('path'),
 		    fs = require('fs');
@@ -184,10 +184,7 @@ module.exports = function LetMeFish(mod) {
 	}
 
 	// branches to cleanup_by_dismantle | reset_fishing
-	function dismantle_start() {
-		console.log("> C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1: " + vContractId);
-		mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContractId});
-
+	function dismantle_more() {
 		awaiting_dismantling =- putinfishes;
 		putinfishes = 0;
 
@@ -265,8 +262,8 @@ module.exports = function LetMeFish(mod) {
 				if (fishList.length) {
 					command.message("Dismantling " + fishList.length + " fish.");
 					if (!vContractId) {
-						console.log("> C_REQUEST_CONTRACT.1");
-						mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
+						vContractId = mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
+						console.log("> C_REQUEST_CONTRACT.1:DECOMP=" + vContractId);
 					}
 					mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START)+15000));
 				}	else if(awaiting_dismantling <= 0) {
@@ -330,11 +327,11 @@ module.exports = function LetMeFish(mod) {
 		}
 	}
 
-	//branches to dismantle_start
+	//branches to dismantle_more
 	function commit_dismantler() {
-		console.log("> C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1':vContractId=" + vContractId);
-		mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, { contract: vContractId });
-		mod.setTimeout(dismantle_start, 1925);
+		console.log("> C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId);
+		mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, { contract: vContractId });
+		mod.setTimeout(dismantle_more, 2000);
 	}
 
 	mod.hook('C_PLAYER_LOCATION', 5, event => { playerLoc = event; });
@@ -357,29 +354,13 @@ module.exports = function LetMeFish(mod) {
 			craftId = lSettings.craftId || 0;
 			let found = BAIT_RECIPES.find(obj => obj.recipeId === craftId);
 			if (found) { baitId = found.itemId;	}
-			else { notificationAFK("Your config file is corrupted, bait recipe id is wrong."); }
+			else { notificationAFK("Your config file is corrupted, the bait recipe id is invalid."); }
 		}
 	});
 
 	// fishing pattern entry
 	function start() {
 		if (hooks.length) return; // edge case where mod isn't loaded properly?
-
-		Hook('S_RP_COMMIT_DECOMPOSITION_CONTRACT', 'raw', event => {
-		  console.log("< S_RP_COMMIT_DECOMPOSITION_CONTRACT: " + vContractId);
-		});
-
-		Hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => {
-			console.log("< S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT: " + vContractId + ", " + event);
-		});
-
-		// Server Response -< S_START_FISHING_MINIGAME.1
-		Hook('S_START_FISHING_CHARGE', 1, event => {
-			if (enabled && myGameId === event.gameId) { // mod.game.me.is(event.gameId)
-				console.log("< S_START_FISHING_CHARGE.1:bEnabled&&bIsMe");
-				mod.setTimeout(() => { mod.send('C_START_FISHING_MINIGAME', 1, {}); }, 1000);
-			}
-		})
 
 		// branches to catch_the_fish AKA send(C_END_FISHING_MINIGAME.1)
 		Hook('S_START_FISHING_MINIGAME', 1, event => {
@@ -394,7 +375,7 @@ module.exports = function LetMeFish(mod) {
 				statFishedTiers[fishTier] = statFishedTiers[fishTier] ? statFishedTiers[fishTier]+1 : 1;
 				command.message("Started fishing minigame, Tier " + fishTier);
 				mod.setTimeout(catch_the_fish, (rng(ACTION_DELAY_FISH_CATCH)+(curTier*1000)));
-				return false; // lets hide that minigame
+				return false; // Hide the minigame.
 			}
 		});
 
@@ -451,13 +432,13 @@ module.exports = function LetMeFish(mod) {
 					}
 				}
 
-				if (!event.more) { command.message(invenItemsBuffer.length + " items in container " + event.container + ", pocket " + event.pocket); }
+				if (!event.more) { console.log(invenItemsBuffer.length + " items in container " + event.container + ", pocket " + event.pocket); }
 				if (event.lastInBatch && !event.more) {
 					invenFirst = true;
-					command.message("You have: " + invenItems.length + " items TOTAL in inventory");
+					command.message("You have " + invenItems.length + " items in your inventory.");
 					if (bTooManyFish && putinfishes === 0) {
 						mod.clearAllTimeouts();
-						mod.setTimeout(function() { command.message("Inventory fully updated, starting dismantling of the next batch of fish"); }, ACTION_DELAY_FISH_START[0]/3);
+						mod.setTimeout(function() { command.message("Dismantling next batch."); }, ACTION_DELAY_FISH_START[0]/3);
 						mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START)/3);
 					}
 				}
@@ -601,6 +582,7 @@ module.exports = function LetMeFish(mod) {
 	}
 
 		// TODO: Change to DEBUG log/message with en/dis cmd and sprinkle EVERYWHERE. dnl/dnm by default, tags/filters?
+		// this way i can filter console.log instead of using directly. I don't have notifier anyways, but will build a quietable version.
 	function notificationAFK(msg, timeout) {
 		command.message(msg);
 		console.log(msg);
