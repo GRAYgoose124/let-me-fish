@@ -41,6 +41,7 @@ module.exports = function LetMeFish(mod) {
 		invenItems = [],
 		statStarted = null,
 		gSettings = {},
+		oldFishLen = -1,
 		settingsFileName;
 
 	if (!fs.existsSync(path.join(__dirname, './saves'))){	fs.mkdirSync(path.join(__dirname, './saves'));	}
@@ -192,11 +193,13 @@ module.exports = function LetMeFish(mod) {
 	}
 
 	// branches to cleanup_by_dismantle | reset_fishing
-	function dismantle_more() {
-		console.log("dismantle_more()");
+	function dismantle_batch() {
+		console.log("dismantle_batch()");
 
 		awaiting_dismantling =- putinfishes;
 		putinfishes = 0;
+
+		mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContractId});
 
 		if (bTooManyFish) {	mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START)+5500); }// timeout backup function	}
 		else {mod.setTimeout(reset_fishing, rng(ACTION_DELAY_FISH_START));}
@@ -263,10 +266,18 @@ module.exports = function LetMeFish(mod) {
 		console.log("cleanup_by_dismantle()");
 
 		if (enabled) {
+
 			if (bDismantleFish || bDismantleFishGold)	{
 				fishList.length = 0;
 				if (bDismantleFish) { fishList = invenItems.filter((item) => item.id >= 206400 && item.id <= 206456); }
 				if (bDismantleFishGold) { fishList = fishList.concat(invenItems.filter((item) => item.id >= 206500 && item.id <= 206514)); }
+
+				if (fishList.length == oldFishLen) {
+					command.log("[ERR] Dismantling failed.")
+					command.message("Dismantling failed, stopping.")
+					stop_fishing();
+					return;
+				}
 
 				if (fishList.length > 20) {
 					console.log("Total fish: " + fishList.length);
@@ -278,8 +289,8 @@ module.exports = function LetMeFish(mod) {
 				if (fishList.length) {
 					command.message("Dismantling " + fishList.length + " fish.");
 					if (!vContractId) {
-						vContractId = mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
-						console.log("< C_REQUEST_CONTRACT.1:DECOMP=" + vContractId);
+						vContractId = mod.toServer('C_REQUEST_CONTRACT', 2, {type: 90, target: "0", intParam: 0});
+						console.log("< C_REQUEST_CONTRACT.2:DECOMP=" + vContractId);
 					}
 					mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START)+15000));
 				}	else if(awaiting_dismantling <= 0) {
@@ -294,6 +305,8 @@ module.exports = function LetMeFish(mod) {
 					awaiting_dismantling = 0;
 					mod.setTimeout(reset_fishing, rng(ACTION_DELAY_FISH_START)); // cancel contract & throw the rod
 				}
+
+				oldFishLen = fishList.length;
 			} else {
 				notificationAFK("Auto-dismamtle is disabled. Unable to clean-up. Stopping.");
 				stop_fishing();
@@ -301,7 +314,7 @@ module.exports = function LetMeFish(mod) {
 		}
 	}
 
-	// branches to add_fish_to_dismantler | commit_dismantler | cleanup_by_dismantle
+	// branches to add_fish_to_dismantler | start_dismantle | cleanup_by_dismantle
 	function add_fish_to_dismantler()	{
 		console.log("add_fish_to_dismantler()");
 
@@ -318,11 +331,11 @@ module.exports = function LetMeFish(mod) {
 				});
 				putinfishes++;
 			}
-
 			if (fishList.length) {
+
 				mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START)/2));
 			}	else {
-				 mod.setTimeout(commit_dismantler, (rng(ACTION_DELAY_FISH_START)/2));
+				 mod.setTimeout(start_dismantle, (rng(ACTION_DELAY_FISH_START)/2));
 			}
 		}	else {
 			command.message("No contract found, retrying.");
@@ -347,13 +360,16 @@ module.exports = function LetMeFish(mod) {
 		}
 	}
 
-	//branches to dismantle_more
-	function commit_dismantler() {
-		console.log("commit_dismantler()");
+	//branches to dismantle_batch
+	function start_dismantle() {
+		console.log("start_dismantle()");
+		//
+		// console.log("< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId);
+		// mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, { contract: vContractId });
+		console.log("< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContractId);
+		mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, { contract: vContractId });
 
-		console.log("< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId);
-		mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, { contract: vContractId });
-		mod.setTimeout(dismantle_more, 2000);
+		mod.setTimeout(dismantle_batch, 2000);
 	}
 
 	mod.hook('C_PLAYER_LOCATION', 5, event => { playerLoc = event; });
@@ -386,7 +402,7 @@ module.exports = function LetMeFish(mod) {
 		if (hooks.length) return; // edge case where mod isn't loaded properly?
 
 		//Check the server response to C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1
-		mod.hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => { console.log("> S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1: " + event); })
+		Hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => { console.log("> S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1:ContractId=" + event.id); })
 
 		// branches to catch_the_fish AKA send(C_END_FISHING_MINIGAME.1)
 		Hook('S_START_FISHING_MINIGAME', 1, event => {
@@ -483,11 +499,11 @@ module.exports = function LetMeFish(mod) {
 		}
 
 		// branches to add_fish_to_dismantler
-		Hook('S_REQUEST_CONTRACT', 1, event => {
+		Hook('S_REQUEST_CONTRACT', 2, event => {
 			if (!enabled || bWaitingForBite || event.type != dismantle_contract_type || event.senderId !== myGameId) return;
 
 			vContractId = event.id;
-			console.log("Dismantling contract id: " + event.id);
+			console.log("> S_REQUEST_CONTRACT.2:id=" + event.id);
 			mod.clearAllTimeouts();
 			mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START)/2));
 		});
@@ -547,7 +563,7 @@ module.exports = function LetMeFish(mod) {
 					if(putinfishes) {
 						bTooManyFish = false;
 						enabled = false;
-						commit_dismantler();
+						start_dismantle();
 						setTimeout(stop_fishing, (rng(ACTION_DELAY_FISH_START)+4000));
 					} else { stop_fishing(); }
 				}
