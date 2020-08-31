@@ -106,17 +106,19 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to use_bait_item
 	function check_if_fishing()	{
+		console.log("check_if_fishing()");
 		command.message("Not fishing... No bait used?");
 		mod.setTimeout(use_bait_item, 500);
 	}
 
 	// branches to craft_bait_start | check_if_fishing
 	function throw_rod() {
+		console.log("throw_rod()");
 	  if (baitId && !invenItems.filter((item) => item.id === baitId).length) {
 			command.message("No bait found in inventory, crafting...");
 			mod.setTimeout(craft_bait_start, rng(ACTION_DELAY_FISH_START)/4);
 		} else if (rodId) {
-			console.log("> C_USE_ITEM.3:rodId")
+			console.log("< C_USE_ITEM.3:rodId");
 			mod.toServer('C_USE_ITEM', 3, {
 				gameId: myGameId,
 				id: rodId,
@@ -141,20 +143,26 @@ module.exports = function LetMeFish(mod) {
 
 	// no branch
 	function reel_the_fish() {
-		 console.log("> C_START_FISHING_MINIGAME.1:");
+		 console.log("reel_the_fish()");
+
+		 console.log("< C_START_FISHING_MINIGAME.1");
 		 mod.toServer("C_START_FISHING_MINIGAME", 1, {counter:1, unk:15});
 	}
 
 	// branches to throw_rod
 	function catch_the_fish() {
+		console.log("catch_the_fish()");
+
 		statFished++;
-		console.log("> C_END_FISHING_MINIGAME.1:");
+		console.log("< C_END_FISHING_MINIGAME.1");
 		mod.toServer("C_END_FISHING_MINIGAME", 1, {counter:1, unk:24, success:true});
 		mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD)+1000);
 	}
 
 	// no branch
 	function stop_fishing() {
+		console.log("stop_fishing()");
+
 		enabled = false
 		vContractId = null;
 		bTooManyFish = false;
@@ -185,6 +193,8 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to cleanup_by_dismantle | reset_fishing
 	function dismantle_more() {
+		console.log("dismantle_more()");
+
 		awaiting_dismantling =- putinfishes;
 		putinfishes = 0;
 
@@ -194,11 +204,13 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to cleanup_by_dismantle | use_bait_item
 	function craft_bait_start(chain) {
+		console.log("craft_bait_start()");
+
 		if (craftId) {
 			let filets = invenItems.find((item) => item.id === 204052);
 			let needed = (chain ? 2 : 1) * (15 + ((craftId - 204100) * 5)); // inven gets updated AFTER you send another C_START_PRODUCE
 			if (filets && filets.amount >= needed ) {  // need one more to trigger "can't craft more bait"
-				console.log("> C_START_PRODUCE.1:craftId");
+				console.log("< C_START_PRODUCE.1:craftId");
 				mod.toServer('C_START_PRODUCE', 1, {recipe:craftId, unk: 0});
 				baitId = BAIT_RECIPES.find(obj => obj.recipeId === craftId).itemId;
 			} else if(!bTriedDismantling)	{
@@ -220,9 +232,11 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to throw_rod
 	function use_bait_item() {
+		console.log("use_bait_item()");
+
 		if (baitId) {
 			bTriedDismantling = false;
-			console.log("> C_USE_ITEM.3:baitId")
+			console.log("< C_USE_ITEM.3:baitId");
 			mod.toServer('C_USE_ITEM', 3, {
 				gameId: myGameId,
 				id: baitId,
@@ -246,6 +260,8 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to add_fish_to_dismantler | reset_fishing
 	function cleanup_by_dismantle()	{
+		console.log("cleanup_by_dismantle()");
+
 		if (enabled) {
 			if (bDismantleFish || bDismantleFishGold)	{
 				fishList.length = 0;
@@ -263,7 +279,7 @@ module.exports = function LetMeFish(mod) {
 					command.message("Dismantling " + fishList.length + " fish.");
 					if (!vContractId) {
 						vContractId = mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
-						console.log("> C_REQUEST_CONTRACT.1:DECOMP=" + vContractId);
+						console.log("< C_REQUEST_CONTRACT.1:DECOMP=" + vContractId);
 					}
 					mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START)+15000));
 				}	else if(awaiting_dismantling <= 0) {
@@ -287,11 +303,13 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to add_fish_to_dismantler | commit_dismantler | cleanup_by_dismantle
 	function add_fish_to_dismantler()	{
+		console.log("add_fish_to_dismantler()");
+
 		if (vContractId) {
 			const fish = fishList.pop();
 			if (fish)	{
 				command.message("Requesting dismantle of: " + fish.id + ", " + fish.dbid);
-				console.log("> C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1: " + vContractId + ", Fid: "  + fish.id + ", DBid: " + fish.dbid);
+				console.log("< C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1: " + vContractId + ", Fid:"  + fish.id + ":DBid:" + fish.dbid + "->Contract=" + vContractId);
 				mod.toServer('C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, {
 					contractId: vContractId,
 					dbid: fish.dbid,
@@ -314,8 +332,10 @@ module.exports = function LetMeFish(mod) {
 
 	// branches to throw_rod
 	function reset_fishing() {
+		console.log("reset_fishing()");
+
 		if (vContractId) {
-			console.log("> C_CANCEL_CONTRACT.1:vContractId")
+			console.log("< C_CANCEL_CONTRACT.1:vContractId");
 			mod.toServer('C_CANCEL_CONTRACT', 1, {
 				type: dismantle_contract_type,
 				id: vContractId
@@ -329,7 +349,9 @@ module.exports = function LetMeFish(mod) {
 
 	//branches to dismantle_more
 	function commit_dismantler() {
-		console.log("> C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId);
+		console.log("commit_dismantler()");
+
+		console.log("< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId);
 		mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, { contract: vContractId });
 		mod.setTimeout(dismantle_more, 2000);
 	}
@@ -360,14 +382,18 @@ module.exports = function LetMeFish(mod) {
 
 	// fishing pattern entry
 	function start() {
+		console.log("start() fish_sequence");
 		if (hooks.length) return; // edge case where mod isn't loaded properly?
+
+		//Check the server response to C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1
+		mod.hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => { console.log("> S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1: " + event); })
 
 		// branches to catch_the_fish AKA send(C_END_FISHING_MINIGAME.1)
 		Hook('S_START_FISHING_MINIGAME', 1, event => {
 			if (!enabled || bWaitingForBite) return;
 
 			if (myGameId === event.gameId) { // TODO: update to use mod.game lib
-				console.log("< S_START_FISHING_MINIGAME.1:bEnabled&&bHasBite&&bIsMe");
+				console.log("> S_START_FISHING_MINIGAME.1:bEnabled&&bHasBite&&bIsMe");
 				let fishTier = event.level;
 				rodId = event.rodId;
 
@@ -384,7 +410,7 @@ module.exports = function LetMeFish(mod) {
 			if (!enabled) return;
 
 			if (myGameId === event.gameId) {
-				console.log("< S_FISHING_BITE.1:bEnabled&&bIsMe");
+				console.log("> S_FISHING_BITE.1:bEnabled&&bIsMe");
 				mod.clearAllTimeouts();
 				mod.setTimeout(reel_the_fish, rng(ACTION_DELAY_FISH_START));
 				leftArea = 0;
