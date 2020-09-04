@@ -21,7 +21,7 @@ module.exports = function LetMeFish(mod) {
         bWaitingForBite = false,
         bTooManyFish = false, // Whether or not we need to use multiple dismantle contracts.
         bTriedDismantling = false,
-        debugLevel = 4,
+        debugLevel = 0,
         myGameId = 0n,
         statFished = 0,
         statFishedTiers = {},
@@ -354,12 +354,13 @@ module.exports = function LetMeFish(mod) {
         //branches to start | stop_fishing
         $none() {
             enabled = !enabled;
-            command.message(`Autofishing is now ${enabled ? "en" : "dis"}abled:`);
+            command.message(`Auto-fishing is now ${enabled ? "en" : "dis"}abled.`);
             if (enabled) {
                 start();
                 bWaitingForBite = true;
-                if (!craftId) {
-                    command.message("Select a bait.");
+                if (!craftId) { // TODO: Save bait/rod and auto-start on command.
+                    command.message("Select a bait to auto-craft in Processing..");
+                    command.message("Activate some bait and throw your rod to auto-fish.");
                 }
                 command.message("Throw your rod.");
             } else {
@@ -412,8 +413,9 @@ module.exports = function LetMeFish(mod) {
     });
 
     function start() {
-        logMsg('INFO', "Fish sequence starting...\nstart()");
         if (hooks.length) return; // edge case where mod isn't loaded properly?
+
+        logMsg('INFO', "start() | Fish sequence starting...");
 
         //Check the server response to C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1
         Hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => {
@@ -709,25 +711,31 @@ module.exports = function LetMeFish(mod) {
         }
 
         if (debugLevel >= lvl) {
-            var logStr = ""
-            var dat = data
+            var logStr = "";
+            var dat = {};
 
-            if (typeof data === 'undefined') {
-                dat = {}
+            if (typeof data !== 'undefined') {
+                for (let entry in Object.entries(data)) {
+                    if (typeof entry[1] === BigInt) {
+                        dat[entry[0]] = entry[0]
+                    } else {
+                        dat[entry[0]] = entry[1]
+                    }
+                }
             }
 
             if (typeof indent !== 'undefined') {
-                logStr = " ".repeat(indent);
+                logStr = "\t".repeat(indent);
             }
 
             try {
-            if (dat !== {}) {
-                logStr = "[".concat(level, "]: ", logStr, str, "\n", logStr, "\t", debugLevel>=4?JSON.stringify(dat, null, 2):"", "\n");
-            } else {
-                logStr = "[".concat(level, "]: ", logStr, str, "\n");
-            }
+                if (dat.length) {
+                    logStr = "[".concat(level, "]: ", logStr, str, "\n", logStr, "\t", debugLevel>=4?JSON.stringify(dat, null, "    ".repeat(indent)):"");
+                } else {
+                    logStr = "[".concat(level, "]: ", logStr, str);
+                }
             } catch (e) {
-                logStr = "[JSON] ".concat(logStr, e, '\n', str, '\n');
+                logStr = "[JSON] ".concat(logStr, e, '\n', str);
             }
             console.log(logStr);
         }
