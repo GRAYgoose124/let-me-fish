@@ -228,7 +228,7 @@ module.exports = function LetMeFish(mod) {
                 }
 
                 if (fishList.length > 20) {
-                    console.log("Total fish: " + fishList.length);
+                    logMsg('INFO', "Total fish: " + fishList.length);
                     awaiting_dismantling = fishList.length;
                     bTooManyFish = true;
                     while (fishList.length > 20) {
@@ -239,7 +239,7 @@ module.exports = function LetMeFish(mod) {
                 }
 
                 if (fishList.length) {
-                    command.message("Dismantling " + fishList.length + " fish.");
+                    logMsg('GAME', "Dismantling " + fishList.length + " fish.");
                     if (!vContractId) {
                         mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
                         logMsg('DEBG', "< C_REQUEST_CONTRACT.1:dismantle=?", {}, 1);
@@ -259,7 +259,7 @@ module.exports = function LetMeFish(mod) {
                 }
 
             } else {
-                command.message("Auto-dismamtle is disabled. Unable to clean-up. Stopping.");
+                logMsg('GAME', "Auto-dismamtle is disabled. Unable to clean-up. Stopping.");
                 stop_fishing();
             }
         }
@@ -288,7 +288,7 @@ module.exports = function LetMeFish(mod) {
                 mod.setTimeout(start_dismantle, (rng(ACTION_DELAY_FISH_START) / 2));
             }
         } else {
-            command.message("No contract found, retrying.");
+            logMsg('GAME', "No contract found, retrying.");
             mod.setTimeout(cleanup_by_dismantle, (rng(ACTION_DELAY_FISH_START)+1500));
         }
     }
@@ -297,8 +297,9 @@ module.exports = function LetMeFish(mod) {
     function start_dismantle() {
         logMsg('INFO', "start_dismantle()");
 
-        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContractId});
-        logMsg('DEBG', "< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContractId, fishList, 1);
+        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId, {}, 1);
+        mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContractId});
+
         mod.setTimeout(dismantle_batch, 1925);
     }
 
@@ -309,8 +310,8 @@ module.exports = function LetMeFish(mod) {
         awaiting_dismantling = -putinfishes;
         putinfishes = 0;
 
-        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId, {}, 1);
-        mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContractId});
+        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContractId});
+        logMsg('DEBG', "< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContractId, fishList, 1);
 
         if (bTooManyFish) {
             mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START) + 5500);
@@ -358,9 +359,11 @@ module.exports = function LetMeFish(mod) {
             if (enabled) {
                 start();
                 bWaitingForBite = true;
-                if (!craftId) { // TODO: Save bait/rod and auto-start on command.
+                if (!craftId) {
                     command.message("Select a bait to auto-craft in Processing..");
                     command.message("Activate some bait and throw your rod to auto-fish.");
+                } else { // TODO: Save bait/rod and auto-start on command.
+                    this.list()
                 }
                 command.message("Throw your rod.");
             } else {
@@ -427,7 +430,7 @@ module.exports = function LetMeFish(mod) {
             if (!enabled || bWaitingForBite) return;
 
             if (myGameId === event.gameId) { // TODO: update to use mod.game lib
-                logMsg('INFO', "> S_START_FISHING_MINIGAME.1:bEnabled&&bHasBite&&bIsMe=True", event, 1);
+                logMsg('INFO', "> S_START_FISHING_MINIGAME.1", event, 1);
                 let fishTier = event.level;
                 rodId = event.rodId;
 
@@ -437,7 +440,7 @@ module.exports = function LetMeFish(mod) {
                 statFishedTiers[fishTier] = statFishedTiers[fishTier] ? statFishedTiers[fishTier] + 1 : 1;
 
                 if (fishTier < 11) {
-                    logMsg('GAME', "Catching tier " + fishTier + " fish.", event);
+                    logMsg('GAME', "Catching tier ".concat(fishTier, " fish. Total: ", statFished + 1), event);
                 } else {
                     logMsg('GAME', "Catching a Goldfish!");
                 }
@@ -452,7 +455,7 @@ module.exports = function LetMeFish(mod) {
             if (!enabled) return;
 
             if (myGameId === event.gameId) {
-                logMsg('DEBG', "> S_FISHING_BITE.1:bEnabled&&bIsMe=True", event, 1);
+                logMsg('DEBG', "> S_FISHING_BITE.1", event, 1);
                 mod.clearAllTimeouts();
                 mod.setTimeout(reel_the_fish, rng(ACTION_DELAY_FISH_START));
                 leftArea = 0;
@@ -503,10 +506,8 @@ module.exports = function LetMeFish(mod) {
                 }
 
                 // if (!event.more) { console.log("\t\t" + invenItemsBuffer.length + " items in container " + event.container + ", pocket " + event.pocket); }
-
                 if (event.lastInBatch && !event.more) {
                     invenFirst = true;
-                    logMsg("GAME", "You have " + invenItems.length + " items in your inventory.", event);
                     if (bTooManyFish && putinfishes === 0) {
                         mod.clearAllTimeouts();
                         mod.setTimeout(() => {
@@ -691,20 +692,20 @@ module.exports = function LetMeFish(mod) {
                 for (let part of str.replace('\t', '').split('\n')) {
                     command.message(part);
                 }
-                lvl = -1;
+                lvl = 0;
                 break
             }
             case 'INFO':
-                lvl = 0;
-                break
-            case 'ERRO':
                 lvl = 1;
                 break
-            case 'WARN':
+            case 'ERRO':
                 lvl = 2;
                 break
-            case 'DEBG':
+            case 'WARN':
                 lvl = 3;
+                break
+            case 'DEBG':
+                lvl = 4;
                 break
             default:
                 return
