@@ -13,6 +13,8 @@ const BAIT_RECIPES = [
     {name: "Bait V", itemId: 206004, recipeId: 204103, wormId: 206009}
 ];
 
+// TODO: auto rod select/savesetting, auto start fish <- auto use bait/stateVar, auto sell fillets & golds.
+
 module.exports = function LetMeFish(mod) {
     const command = mod.command,
         dismantle_contract_type = (mod.majorPatchVersion >= 85 ? 90 : 89);
@@ -51,7 +53,7 @@ module.exports = function LetMeFish(mod) {
     // branches to use_bait_item
     function check_if_fishing() {
         logMsg('INFO', "check_if_fishing()");
-        command.message("Not fishing... No bait used?");
+        logMsg('GAME', "Not fishing... No bait used?");
         mod.setTimeout(use_bait_item, 500);
     }
 
@@ -59,7 +61,7 @@ module.exports = function LetMeFish(mod) {
     function throw_rod() {
         logMsg('INFO', "throw_rod()");
         if (baitId && !invenItems.filter((item) => item.id === baitId).length) {
-            command.message("No bait found in inventory, crafting...");
+            logMsg('GAME', "No bait found in inventory, crafting...");
             mod.setTimeout(craft_bait_start, rng(ACTION_DELAY_FISH_START) / 4);
         } else if (rodId) {
             logMsg('DEBG', "< C_USE_ITEM.3:rodId=" + rodId, {}, 1);
@@ -127,16 +129,16 @@ module.exports = function LetMeFish(mod) {
             let m = addZero(d.getMinutes());
             let s = addZero(d.getSeconds());
 
-            logMsg('GAME', '\nObtained ' + statFished + ' fish.\t\nTime elapsed: ' + (h + ":" + m + ":" + s) + "\t" + Math.round((timeElapsedMSec / statFished) / 1000) + " sec/fish\n\nFish:");
+            logMsg('GAME', '\nObtained ' + statFished + ' fish.\t\nTime elapsed: ' + (h + ":" + m + ":" + s) + "\t" + Math.round((timeElapsedMSec / statFished) / 1000) + " sec/fish\n\nFish:", {}, 1);
             for (let i in statFishedTiers) {
-                logMsg('GAME', 'Tier ' + i + ': ' + statFishedTiers[i], {}, 1);
+                logMsg('CONT', 'Tier ' + i + ': ' + statFishedTiers[i], {}, 1);
             }
             console.log("\n")
 
             statFished = 0;
             statFishedTiers = {};
         } else {
-            command.message('Autofishing disabled.');
+            logMsg('GAME', 'Autofishing disabled.');
         }
     }
 
@@ -171,16 +173,16 @@ module.exports = function LetMeFish(mod) {
             } else if (!bTriedDismantling) {
                 bTriedDismantling = true;
                 mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_THROW_ROD));
-                command.message("You don't have enough fish parts to craft a bait... dismantling fishes to get some");
+                logMsg('GAME', "You don't have enough fish parts to craft a bait... dismantling fishes to get some");
             } else if (chain || invenItems.filter((item) => item.id === baitId).length) {
-                command.message("Crafted few bait items, then ran out of fish parts, fishing...");
+                logMsg('GAME', "Crafted few bait items, then ran out of fish parts, fishing...");
                 mod.setTimeout(use_bait_item, rng(ACTION_DELAY_FISH_START));
             } else {
-                command.message("You don't have enough filets or fish to craft bait. Stopping.");
+                logMsg('GAME', "You don't have enough filets or fish to craft bait. Stopping.");
                 stop_fishing();
             }
         } else {
-            command.message("You didn't provide a sample craft recipe for bait. Stopping.");
+            logMsg('GAME', "You didn't provide a sample craft recipe for bait. Stopping.");
             stop_fishing();
         }
     }
@@ -208,7 +210,7 @@ module.exports = function LetMeFish(mod) {
             });
             mod.setTimeout(throw_rod, rng(ACTION_DELAY_FISH_START));
         } else {
-            command.message("No bait.");
+            logMsg('GAME', "No bait.");
             stop_fishing();
         }
     }
@@ -246,20 +248,19 @@ module.exports = function LetMeFish(mod) {
                     }
                     mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) + 15000));
                 } else if (awaiting_dismantling <= 0) {
-                    command.message("Cannot dismantle anything.");
+                    logMsg('GAME', "Cannot dismantle anything.");
                     stop_fishing();
                 } else {
-                    console.log(awaiting_dismantling + " fish awaiting dismantling but couldn't be found in inventory.");
-                    console.log("inventory: (reported empty of fish)");
-                    console.log(invenItems);
-                    console.log("fish array (reported empty): ");
-                    console.log(fishList);
+                    let log_str = awaiting_dismantling.concat(" fish awaiting dismantling but couldn't be found in inventory.\n",
+                        "inventory: (reported empty of fish)\n", invenItems, "\nfish array (reported empty): \n", fishList);
+                    logMsg('GAME', log_str);
+
                     awaiting_dismantling = 0;
                     mod.setTimeout(reset_fishing, rng(ACTION_DELAY_FISH_START)); // cancel contract & throw the rod
                 }
 
             } else {
-                logMsg('GAME', "Auto-dismamtle is disabled. Unable to clean-up. Stopping.");
+                logMsg('GAME', "Auto-dismantle is disabled. Unable to clean-up. Stopping.");
                 stop_fishing();
             }
         }
@@ -272,7 +273,6 @@ module.exports = function LetMeFish(mod) {
         if (vContractId) {
             const fish = fishList.pop();
             if (fish) {
-                // command.message("Requesting dismantle of: " + fish.id + ", " + fish.dbid);
                 logMsg('DEBG', "< C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1=" + vContractId, fish, 1);
                 mod.toServer('C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, {
                     contract: vContractId,
@@ -345,7 +345,7 @@ module.exports = function LetMeFish(mod) {
             if (found) {
                 baitId = found.itemId;
             } else {
-                command.message("Your config file is corrupted, the bait recipe id is invalid.");
+                logMsg('GAME', "Your config file is corrupted, the bait recipe id is invalid.");
             }
         }
     });
@@ -355,7 +355,7 @@ module.exports = function LetMeFish(mod) {
         //branches to start | stop_fishing
         $none() {
             enabled = !enabled;
-            command.message(`Auto-fishing is now ${enabled ? "en" : "dis"}abled.`);
+            logMsg('GAME', `Auto-fishing is now ${enabled ? "en" : "dis"}abled.`);
             if (enabled) {
                 start();
                 bWaitingForBite = true;
@@ -363,7 +363,8 @@ module.exports = function LetMeFish(mod) {
                     command.message("Select a bait to auto-craft in Processing..");
                     command.message("Activate some bait and throw your rod to auto-fish.");
                 } else { // TODO: Save bait/rod and auto-start on command.
-                    this.list()
+                    logMsg('GAME', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait: \n\t", (baitId ? baitId : "none"),
+                        "\n\tAutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold));
                 }
                 command.message("Throw your rod.");
             } else {
@@ -372,33 +373,32 @@ module.exports = function LetMeFish(mod) {
         },
         dismantle() {
             bDismantleFish = !bDismantleFish;
-            command.message(`Common Fish dismantling is ${bDismantleFish ? "en" : "dis"}abled.`);
+            logMsg('GAME', `Common Fish dismantling is ${bDismantleFish ? "en" : "dis"}abled.`);
         },
         gold() {
             bDismantleFishGold = !bDismantleFishGold;
-            command.message(`Gold Fish dismantling is ${bDismantleFishGold ? "en" : "dis"}abled.`);
+            logMsg('GAME', `Gold Fish dismantling is ${bDismantleFishGold ? "en" : "dis"}abled.`);
         },
         reset() {
             bDismantleFish = true;
             bDismantleFishGold = false;
             craftId = 0;
             baitId = 0;
-            command.message("Craft recipe, bait to use, and fish to dismantle reset to defaults.");
+            logMsg('GAME', "Craft recipe, bait to use, and fish to dismantle reset to defaults.");
         },
         list() {
-            command.message("Autocraft recipe: " + (craftId ? craftId : "none"));
-            command.message("Bait: " + (baitId ? baitId : "none"));
-            command.message("AutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold);
+            logMsg('GAME', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait: \n\t", (baitId ? baitId : "none"),
+                "\n\tAutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold));
         },
         save() {
-            command.message("Saved.");
+            logMsg('GAME', "Saved settings.");
             gSettings.bDismantleFish = bDismantleFish;
             gSettings.bDismantleFishGold = bDismantleFishGold;
             gSettings.craftId = craftId;
             saveSettings(gSettings);
         },
         load() {
-            command.message("Loaded.");
+            logMsg('GAME', "Loaded settings.");
             gSettings = loadSettings();
             bDismantleFish = gSettings.bDismantleFish;
             bDismantleFishGold = gSettings.bDismantleFishGold;
@@ -407,11 +407,11 @@ module.exports = function LetMeFish(mod) {
             if (found) {
                 baitId = found.itemId;
             } else {
-                command.message("Load failed, couldn't find bait.");
+                logMsg('GAME', "Load failed, couldn't find bait.");
             }
         },
         $default() {
-            command.message('Invalid command.')
+            logMsg('GAME', 'Invalid command.')
         }
     });
 
@@ -464,14 +464,14 @@ module.exports = function LetMeFish(mod) {
                     rodId = event.rodId;
                     let d = new Date();
                     statStarted = d.getTime();
-                    command.message("Rod set to: " + rodId);
+                    logMsg('GAME', "Rod set to: " + rodId);
                     if (!craftId) {
-                        command.message("No bait craft recipe, cannot autocraft.");
+                        logMsg('GAME', "No bait craft recipe, cannot autocraft.");
                     }
                     if (!bDismantleFish && !bDismantleFishGold) {
-                        command.message("Fish auto-dismantling is off. Cannot auto-dismantle.");
+                        logMsg('GAME', "Fish auto-dismantling is off. Cannot auto-dismantle.");
                     }
-                    command.message("Auto-fishing on.");
+                    logMsg('GAME', "Auto-fishing on.");
                 }
 
                 return false; // Hide minigame
@@ -482,7 +482,7 @@ module.exports = function LetMeFish(mod) {
         Hook('S_LOAD_TOPO', 3, () => {
             if (enabled) {
                 stop_fishing();
-                command.message("Teleported. AF stopped.");
+                logMsg('GAME', "Teleported. AF stopped.");
             }
         });
 
@@ -511,7 +511,7 @@ module.exports = function LetMeFish(mod) {
                     if (bTooManyFish && putinfishes === 0) {
                         mod.clearAllTimeouts();
                         mod.setTimeout(() => {
-                            command.message("Dismantling next batch.");
+                            logMsg('GAME', "Dismantling next batch.");
                         }, ACTION_DELAY_FISH_START[0] / 3);
                         mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START) / 3);
                     }
@@ -525,7 +525,7 @@ module.exports = function LetMeFish(mod) {
                 if (bTooManyFish && putinfishes === 0 && !event.more) {
                     mod.clearAllTimeouts();
                     mod.setTimeout(function () {
-                        command.message("Inventory fully updated, starting dismantling of the next batch of fish");
+                        logMsg('GAME', "Inventory fully updated, starting dismantling of the next batch of fish");
                     }, ACTION_DELAY_FISH_START[0] / 3);
                     mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START) / 3);
                 }
@@ -585,7 +585,7 @@ module.exports = function LetMeFish(mod) {
             const msg = mod.parseSystemMessage(event.message);
 
             if (msg.id === 'SMT_CANNOT_FISHING_NON_BAIT') {
-                command.message("Out of bait, crafting...");
+                logMsg('GAME', "Out of bait, crafting...");
                 mod.clearAllTimeouts();
                 mod.setTimeout(craft_bait_start, rng(ACTION_DELAY_FISH_START));
             } else if (msg.id === 'SMT_ITEM_CANT_POSSESS_MORE') {
@@ -593,14 +593,14 @@ module.exports = function LetMeFish(mod) {
                     mod.clearAllTimeouts();
                     let itemId = Number(msg.tokens.ItemName.substr(6));
                     if (itemId >= 206006 && itemId <= 206009) {
-                        command.message("Max bait crafted, restarting fishing with worms.");
+                        logMsg('GAME', "Max bait crafted, restarting fishing with worms.");
                         baitId = itemId;
                     } else {
-                        command.message("Max bait crafted, restarting fishing.");
+                        logMsg('GAME', "Max bait crafted, restarting fishing.");
                     }
                     mod.setTimeout(use_bait_item, rng(ACTION_DELAY_FISH_START));
                 } else {
-                    command.message("You have reached the 10k dismantled fish parts limit, stopping.");
+                    logMsg('GAME', "You have reached the 10k dismantled fish parts limit, stopping.");
                     mod.clearAllTimeouts();
                     if (putinfishes) {
                         bTooManyFish = false;
@@ -612,29 +612,29 @@ module.exports = function LetMeFish(mod) {
                     }
                 }
             } else if (msg.id === 'SMT_CANNOT_FISHING_FULL_INVEN') { // auto-dismantle entry.
-                console.log("Inventory full, dismantling.");
+                logMsg('GAME', "Inventory full, dismantling.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START) + 1500);
             } else if (msg.id === 'SMT_CANNOT_FISHING_NON_AREA') {
-                console.log("Fishing area changed, retrying.");
+                logMsg('GAME', "Fishing area changed, retrying.");
                 mod.clearAllTimeouts();
                 leftArea++;
                 if (leftArea < 7) {
                     mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD));
                 } else {
                     stop_fishing();
-                    command.message("Casn't seem to fish in this area, stopping.");
+                    logMsg('GAME', "Can't seem to fish in this area, stopping.");
                 }
             } else if (msg.id === 'SMT_FISHING_RESULT_CANCLE') {
-                console.log("Fishing cancelled, retrying.");
+                logMsg('GAME', "Fishing cancelled, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_FISH_START));
             } else if (msg.id === 'SMT_YOU_ARE_BUSY' && !vContractId) {
-                console.log("SMT_YOU_ARE_BUSY, retrying.");
+                logMsg('GAME', "SMT_YOU_ARE_BUSY, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD) + 3000);
             } else if (msg.id === 'SMT_CANNOT_USE_ITEM_WHILE_CONTRACT') {
-                console.log("In a contract, retrying.");
+                logMsg('GAME', "In a contract, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, (rng(ACTION_DELAY_THROW_ROD) + 3000));
             }
@@ -687,6 +687,12 @@ module.exports = function LetMeFish(mod) {
     // TODO: game and debug console independent.  Clean and fix.
     function logMsg(level, str, data, indent) {
         var lvl = null;
+        var logStr = "";
+
+        if (typeof indent !== 'undefined') {
+            logStr = "\t".repeat(indent);
+        }
+
         switch (level) {
             case 'GAME': {
                 for (let part of str.replace('\t', '').split('\n')) {
@@ -707,26 +713,21 @@ module.exports = function LetMeFish(mod) {
             case 'DEBG':
                 lvl = 4;
                 break
+            case 'CONT':
+                for (let part of str.replace('\t', '').split('\n')) {
+                    command.message(part);
+                }
+                console.log(logStr + str);
+                return
             default:
                 return
         }
 
         if (debugLevel >= lvl) {
-            var logStr = "";
             var dat = {};
 
             if (typeof data !== 'undefined') {
-                for (let entry in Object.entries(data)) {
-                    if (typeof entry[1] === BigInt) {
-                        dat[entry[0]] = entry[0]
-                    } else {
-                        dat[entry[0]] = entry[1]
-                    }
-                }
-            }
-
-            if (typeof indent !== 'undefined') {
-                logStr = "\t".repeat(indent);
+                dat = jsonify(data);
             }
 
             try {
@@ -738,8 +739,20 @@ module.exports = function LetMeFish(mod) {
             } catch (e) {
                 logStr = "[JSON] ".concat(logStr, e, '\n', str);
             }
+
             console.log(logStr);
         }
+    }
+
+    function jsonify(d) {
+        var dat = {};
+        for (let key in d) {
+            switch(typeof d[key]) {
+                case "bigint": dat[key] = d[key].toString(16); break
+                default: dat[key] = d[key]; break
+            }
+        }
+        return dat;
     }
 
     function unload() {
