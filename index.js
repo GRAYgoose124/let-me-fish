@@ -1,7 +1,7 @@
-const ACTION_DELAY_THROW_ROD = [2000, 3000],		// [Min, Max] in ms, 1000 ms = 1 sec
-    ACTION_DELAY_FISH_START = [2000, 2500],		// [Min, Max] - the pressing of F button to reel and start the minigame
-    ACTION_DELAY_FISH_CATCH = [2000, 3500],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
-    DELAY_BASED_ON_FISH_TIER = false; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
+const ACTION_DELAY_THROW_ROD = [1500, 1700],		// [Min, Max] in ms, 1000 ms = 1 sec
+    ACTION_DELAY_FISH_START = [1500, 1800],		// [Min, Max] - the pressing of F button to reel and start the minigame
+    ACTION_DELAY_FISH_CATCH = [2500, 3000],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
+    DELAY_BASED_ON_FISH_TIER = true; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
 
 const path = require('path'),
     fs = require('fs');
@@ -13,7 +13,37 @@ const BAIT_RECIPES = [
     {name: "Bait V", itemId: 206004, recipeId: 204103, wormId: 206009}
 ];
 
-// TODO: auto rod select/savesetting, auto start fish <- auto use bait/stateVar, auto sell fillets & golds.
+// TODO: Re-add Auto-nego integration -- simply on a nego hook, stop fishing and start after nego max delay.
+// TODO: auto-buy palid for angler tokens
+const CONTRACT = {
+    id: null,
+    type: null
+}
+
+const TEMPLATE_SELLER = [9903, 9906, 1960, 1961];
+const TEMPLATE_BANKER = 1962;
+const FILET_ID = 204052;
+
+const BAITS = {
+    70365: 206905, // Dappled Bait 80% + 5%
+    70364: 206904, // Rainbow Bait 80% + 10%
+    70363: 206903, // Mechanical Worm 80% + 15%
+    70362: 206902, // Enhanced Mechanical Worm 80% + 20%
+    70361: 206901, // Popo Bait 80% + 25%
+    70360: 206900, // Popori Bait 80% + 30%
+    70281: 206005, // Red Angleworm 0%
+    70282: 206006, // Green Angleworm 20%
+    70283: 206007, // Blue Angleworm 40%
+    70284: 206008, // Purple Angleworm 60%
+    70285: 206009, // Golden Angleworm 80%
+    70286: 206828, // Celisium Fragment Bait
+    70379: 143188, // Event Bait I
+    5000012: 143188, // Event Bait II,
+    5060038: 856470, // ICEFISH BAIT
+    70276: 206053,// Pilidium Bait, remove from inv and bag all others baits
+    70371 : 209189 // Event Shark Bait - can only be used at Murcai Fishery
+};
+// TODO:  auto start fish <- auto use bait/stateVar, auto sell fillets & golds.
 
 module.exports = function LetMeFish(mod) {
     const command = mod.command,
@@ -39,7 +69,7 @@ module.exports = function LetMeFish(mod) {
         putinfishes = 0,
         awaiting_dismantling = 0,
         playerLoc = null,
-        vContractId = null,
+        vContract = {...CONTRACT},
         invenItems = [],
         statStarted = null,
         gSettings = {},
@@ -111,7 +141,7 @@ module.exports = function LetMeFish(mod) {
         logMsg('INFO', "stop_fishing()");
 
         enabled = false
-        vContractId = null;
+        vContract = {...CONTRACT};
         bTooManyFish = false;
         bTriedDismantling = false;
         putinfishes = 0;
@@ -146,13 +176,13 @@ module.exports = function LetMeFish(mod) {
     function reset_fishing() {
         logMsg('INFO', "reset_fishing()");
 
-        if (vContractId) {
-            logMsg('DEBG', "< C_CANCEL_CONTRACT.1:vContractId=" + vContractId, {}, 1);
+        if (vContract.id) {
+            logMsg('DEBG', "< C_CANCEL_CONTRACT.1:vContractId=" + vContract.id, {}, 1);
             mod.toServer('C_CANCEL_CONTRACT', 1, {
-                type: dismantle_contract_type,
-                id: vContractId
+                type: vContract.type,
+                id: vContract.id
             });
-            vContractId = null;
+            vContract = {...CONTRACT};
         }
         if (enabled) {
             mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD) + 1000); // lets resume fishing
@@ -242,7 +272,7 @@ module.exports = function LetMeFish(mod) {
 
                 if (fishList.length) {
                     logMsg('GAME', "Dismantling " + fishList.length + " fish.");
-                    if (!vContractId) {
+                    if (vContract.id === null) {
                         mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
                         logMsg('DEBG', "< C_REQUEST_CONTRACT.1:dismantle=?", {}, 1);
                     }
@@ -270,26 +300,28 @@ module.exports = function LetMeFish(mod) {
     function add_fish_to_dismantler() {
         logMsg('INFO', "add_fish_to_dismantler()");
 
-        if (vContractId) {
-            const fish = fishList.pop();
-            if (fish) {
-                logMsg('DEBG', "< C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1=" + vContractId, fish, 1);
-                mod.toServer('C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, {
-                    contract: vContractId,
-                    dbid: fish.dbid,
-                    itemid: fish.id,
-                    amount: 1
-                });
-                putinfishes++;
-            }
-            if (fishList.length) {
-                mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 4));
+        if (vContract.id !== null) {
+            if (vContract.type === dismantle_contract_type) {
+                const fish = fishList.pop();
+                if (fish) {
+                    logMsg('DEBG', "< C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1=" + vContract.id, fish, 1);
+                    mod.toServer('C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, {
+                        contract: vContract.id,
+                        dbid: fish.dbid,
+                        itemid: fish.id,
+                        amount: 1
+                    });
+                    putinfishes++;
+                }
+                if (fishList.length) {
+                    mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 4));
+                } else {
+                    mod.setTimeout(start_dismantle, (rng(ACTION_DELAY_FISH_START) / 2));
+                }
             } else {
-                mod.setTimeout(start_dismantle, (rng(ACTION_DELAY_FISH_START) / 2));
+                logMsg('GAME', "No dismantle contract found, retrying.");
+                mod.setTimeout(cleanup_by_dismantle, (rng(ACTION_DELAY_FISH_START)+1500));
             }
-        } else {
-            logMsg('GAME', "No contract found, retrying.");
-            mod.setTimeout(cleanup_by_dismantle, (rng(ACTION_DELAY_FISH_START)+1500));
         }
     }
 
@@ -297,8 +329,8 @@ module.exports = function LetMeFish(mod) {
     function start_dismantle() {
         logMsg('INFO', "start_dismantle()");
 
-        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContractId, {}, 1);
-        mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContractId});
+        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContract.id, {}, 1);
+        mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContract.id});
 
         mod.setTimeout(dismantle_batch, 1925);
     }
@@ -310,8 +342,8 @@ module.exports = function LetMeFish(mod) {
         awaiting_dismantling = -putinfishes;
         putinfishes = 0;
 
-        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContractId});
-        logMsg('DEBG', "< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContractId, fishList, 1);
+        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContract.id});
+        logMsg('DEBG', "< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContract.id, fishList, 1);
 
         if (bTooManyFish) {
             mod.setTimeout(cleanup_by_dismantle, rng(ACTION_DELAY_FISH_START) + 5500);
@@ -328,7 +360,7 @@ module.exports = function LetMeFish(mod) {
         myGameId = event.gameId;
         invenItems = [];
         rodId = null;
-        vContractId = null;
+        vContract = {...CONTRACT};
         putinfishes = 0;
         settingsFileName = `./saves/${event.name}-${event.serverId}.json`;
         let lSettings = loadSettings();
@@ -363,7 +395,7 @@ module.exports = function LetMeFish(mod) {
                     command.message("Select a bait to auto-craft in Processing..");
                     command.message("Activate some bait and throw your rod to auto-fish.");
                 } else { // TODO: Save bait/rod and auto-start on command.
-                    logMsg('GAME', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait: \n\t", (baitId ? baitId : "none"),
+                    logMsg('CONT', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait:\t", (baitId ? baitId : "none"),
                         "\n\tAutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold));
                 }
                 command.message("Throw your rod.");
@@ -387,7 +419,7 @@ module.exports = function LetMeFish(mod) {
             logMsg('GAME', "Craft recipe, bait to use, and fish to dismantle reset to defaults.");
         },
         list() {
-            logMsg('GAME', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait: \n\t", (baitId ? baitId : "none"),
+            logMsg('CONT', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait: \n\t", (baitId ? baitId : "none"),
                 "\n\tAutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold));
         },
         save() {
@@ -445,7 +477,7 @@ module.exports = function LetMeFish(mod) {
                     logMsg('GAME', "Catching a Goldfish!");
                 }
 
-                mod.setTimeout(catch_the_fish, (rng(ACTION_DELAY_FISH_CATCH) + (curTier * 1000)));
+                mod.setTimeout(catch_the_fish, (rng(ACTION_DELAY_FISH_CATCH) + (curTier * 100)));
                 return false; // Hide the minigame.
             }
         });
@@ -478,13 +510,7 @@ module.exports = function LetMeFish(mod) {
             }
         });
 
-        // Stop fishing on tp.
-        Hook('S_LOAD_TOPO', 3, () => {
-            if (enabled) {
-                stop_fishing();
-                logMsg('GAME', "Teleported. AF stopped.");
-            }
-        });
+
 
         // branches to cleanup_by_dismantle
         if (mod.majorPatchVersion >= 85) {
@@ -532,27 +558,37 @@ module.exports = function LetMeFish(mod) {
             });
         }
 
-        // branches to add_fish_to_dismantler
+        // v
         Hook('S_REQUEST_CONTRACT', 1, event => {
             logMsg('DEBG', '> S_REQUEST_CONTRACT.1:event.type=' + event.type, event, 1)
-            if (!enabled || bWaitingForBite || event.type !== dismantle_contract_type || event.senderId !== myGameId) return;
-            logMsg('DEBG', "Dismantle:ContractId=" + event.id, event, 2);
+            if (!enabled || bWaitingForBite || event.senderId !== myGameId) return;
 
-            vContractId = event.id;
+            vContract.id = event.id;
+            vContract.type = event.type;
 
-            mod.clearAllTimeouts();
-            mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 2));
+            if (event.type === dismantle_contract_type) {
+                logMsg('DEBG', "Dismantle:ContractId=" + event.id, event, 2);
+
+                mod.clearAllTimeouts();
+                mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 2));
+            } else {
+                vContract = {...CONTRACT};
+            }
         });
 
-        // branches to throw_rod
+        // branches to throw_rod because the loop expects to cancel a dismantle contract, this needs to be refactored.
         Hook('S_CANCEL_CONTRACT', 1, event => {
-            if (!enabled || bWaitingForBite || event.type !== dismantle_contract_type || event.id !== vContractId || event.senderId !== myGameId) return;
-            logMsg("DEBG", "> S_CANCEL_CONTRACT.2:id=" + event.id, event, 1);
+            if (!enabled || bWaitingForBite || event.id !== vContract.id || event.senderId !== myGameId) return;
 
-            vContractId = null;
-            logMsg('GAME', "Contract for dismantling cancelled (not by this mod), retrying fishing sequence...", event);
-            mod.clearAllTimeouts();
-            mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD));
+            if (event.type === dismantle_contract_type) {
+                logMsg("DEBG", "> S_CANCEL_CONTRACT.2:id=" + event.id, event, 1);
+
+                vContract = {...CONTRACT};
+
+                logMsg('GAME', "Contract for dismantling cancelled (not by this mod), retrying fishing sequence...", event);
+                mod.clearAllTimeouts();
+                mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD));
+            }
         });
 
         // bait craft
@@ -589,7 +625,7 @@ module.exports = function LetMeFish(mod) {
                 mod.clearAllTimeouts();
                 mod.setTimeout(craft_bait_start, rng(ACTION_DELAY_FISH_START));
             } else if (msg.id === 'SMT_ITEM_CANT_POSSESS_MORE') {
-                if (!vContractId) {
+                if (vContract.id !== null) {
                     mod.clearAllTimeouts();
                     let itemId = Number(msg.tokens.ItemName.substr(6));
                     if (itemId >= 206006 && itemId <= 206009) {
@@ -629,7 +665,7 @@ module.exports = function LetMeFish(mod) {
                 logMsg('GAME', "Fishing cancelled, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_FISH_START));
-            } else if (msg.id === 'SMT_YOU_ARE_BUSY' && !vContractId) {
+            } else if (msg.id === 'SMT_YOU_ARE_BUSY' && vContract.id !== null) {
                 logMsg('GAME', "SMT_YOU_ARE_BUSY, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD) + 3000);
@@ -640,15 +676,22 @@ module.exports = function LetMeFish(mod) {
             }
         });
 
+        // Utility hooks
         // Anti-GM
         Hook('S_SPAWN_USER', 15, event => {
             if (event.gm && enabled) {
                 logMsg('GAME', "GM near you, temporarily stopping.", event);
-
                 stop_fishing();
-
                 enabled = true;
                 mod.setTimeout(reset_fishing, rng([60000, 180000]));
+            }
+        });
+
+        // Stop fishing on tp.
+        Hook('S_LOAD_TOPO', 3, () => {
+            if (enabled) {
+                stop_fishing();
+                logMsg('GAME', "Teleported. AF stopped.");
             }
         });
     }
@@ -694,13 +737,17 @@ module.exports = function LetMeFish(mod) {
         }
 
         switch (level) {
-            case 'GAME': {
+            case 'GAME':
+            case 'CONT':
                 for (let part of str.replace('\t', '').split('\n')) {
                     command.message(part);
                 }
-                lvl = 0;
+                if (level === 'CONT') {
+                    console.log(logStr + str);
+                    return;
+                }
+                lvl = 0
                 break
-            }
             case 'INFO':
                 lvl = 1;
                 break
@@ -713,12 +760,7 @@ module.exports = function LetMeFish(mod) {
             case 'DEBG':
                 lvl = 4;
                 break
-            case 'CONT':
-                for (let part of str.replace('\t', '').split('\n')) {
-                    command.message(part);
-                }
-                console.log(logStr + str);
-                return
+
             default:
                 return
         }
