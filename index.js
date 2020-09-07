@@ -1,10 +1,15 @@
-const ACTION_DELAY_THROW_ROD = [1500, 1700],		// [Min, Max] in ms, 1000 ms = 1 sec
-    ACTION_DELAY_FISH_START = [1500, 1800],		// [Min, Max] - the pressing of F button to reel and start the minigame
-    ACTION_DELAY_FISH_CATCH = [2500, 3000],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
-    DELAY_BASED_ON_FISH_TIER = true; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
-
 const path = require('path'),
     fs = require('fs');
+
+const ACTION_DELAY_THROW_ROD   = [1700, 2000],		// [Min, Max] in ms, 1000 ms = 1 sec
+      ACTION_DELAY_FISH_START  = [1700, 2000],		// [Min, Max] - the pressing of F button to reel and start the minigame
+      ACTION_DELAY_FISH_CATCH  = [2700, 3000],	// [Min, Max] - time to win the fishing minigame and get a fish as prize
+      DELAY_BASED_ON_FISH_TIER = true; // tier 4 would get caught 4 sec longer, BAF (tier 11) would get caught 11 sec longer etc
+
+const TEMPLATE_SELLER = [9903, 9906, 1960, 1961];
+const TEMPLATE_BANKER = 1962;
+const ITEMS_SALAD = [206020, 206040];
+const FILET_ID = 204052;
 
 const BAIT_RECIPES = [
     {name: "Bait II", itemId: 206001, recipeId: 204100, wormId: 206006},
@@ -13,53 +18,57 @@ const BAIT_RECIPES = [
     {name: "Bait V", itemId: 206004, recipeId: 204103, wormId: 206009}
 ];
 
-// TODO: Re-add Auto-nego integration -- simply on a nego hook, stop fishing and start after nego max delay.
-// TODO: auto-buy palid for angler tokens
 const CONTRACT = {
     id: null,
     type: null
 }
 
-const TEMPLATE_SELLER = [9903, 9906, 1960, 1961];
-const TEMPLATE_BANKER = 1962;
-const FILET_ID = 204052;
+// let fishingSettings = { // TODO: move to structs and store data to make decisions on.
+//     enabled: false,
+//     bWaitingForBite: false,
+//     bTooManyFish: false, // Whether or not we need to use multiple dismantle contracts.
+//     bTriedDismantling: false,
+//     bDismantleFish: true,
+//     bDismantleFishGold: false,
+// }
+//
+// let playerState = {
+//     playerLoc: null,
+//     invenItems: [],
+//     myGameId: 0n,
+//
+// }
+//
+// let fishingState = {
+//     rodId: 0,
+//     baitId: 0,   // BAIT_RECIPES.find(obj => obj.recipeId === craftId).baitId || wormId
+//     craftId: 0,  // BAIT_RECIPES.find(obj => obj.recipeId === craftId).itemId
+//     contractId: null,
+//     statFishedTiers: {},
+//     statFished: 0,
+// }
 
-const BAITS = {
-    70365: 206905, // Dappled Bait 80% + 5%
-    70364: 206904, // Rainbow Bait 80% + 10%
-    70363: 206903, // Mechanical Worm 80% + 15%
-    70362: 206902, // Enhanced Mechanical Worm 80% + 20%
-    70361: 206901, // Popo Bait 80% + 25%
-    70360: 206900, // Popori Bait 80% + 30%
-    70281: 206005, // Red Angleworm 0%
-    70282: 206006, // Green Angleworm 20%
-    70283: 206007, // Blue Angleworm 40%
-    70284: 206008, // Purple Angleworm 60%
-    70285: 206009, // Golden Angleworm 80%
-    70286: 206828, // Celisium Fragment Bait
-    70379: 143188, // Event Bait I
-    5000012: 143188, // Event Bait II,
-    5060038: 856470, // ICEFISH BAIT
-    70276: 206053,// Pilidium Bait, remove from inv and bag all others baits
-    70371 : 209189 // Event Shark Bait - can only be used at Murcai Fishery
-};
-// TODO:  auto start fish <- auto use bait/stateVar, auto sell fillets & golds.
+// TODO: Re-add Auto-nego integration -- simply on a nego hook, stop fishing and start after nego max delay.
+// TODO: auto-buy palid for angler tokens
+// TODO: auto sell fillets & golds.
+// TODO: auto salad
 
 module.exports = function LetMeFish(mod) {
     const command = mod.command,
-        dismantle_contract_type = (mod.majorPatchVersion >= 85 ? 90 : 89);
+        dismantle_contract_type = (mod.majorPatchVersion >= 85 ? 90 : 89),
+        craft_contract_type = (mod.majorPatchVersion >= 85 ? 31 : null); // don't know pre-85 value.
 
     let enabled = false,
         bWaitingForBite = false,
         bTooManyFish = false, // Whether or not we need to use multiple dismantle contracts.
         bTriedDismantling = false,
-        debugLevel = 0,
+        bDismantleFish = true,
+        bDismantleFishGold = false,
+        debugLevel = 4,
         myGameId = 0n,
         statFished = 0,
         statFishedTiers = {},
         hooks = [],
-        bDismantleFish = true,
-        bDismantleFishGold = false,
         fishList = [],
         curTier = 0,
         rodId = 0,
@@ -69,7 +78,7 @@ module.exports = function LetMeFish(mod) {
         putinfishes = 0,
         awaiting_dismantling = 0,
         playerLoc = null,
-        vContract = {...CONTRACT},
+        vContract = null,
         invenItems = [],
         statStarted = null,
         gSettings = {},
@@ -141,7 +150,7 @@ module.exports = function LetMeFish(mod) {
         logMsg('INFO', "stop_fishing()");
 
         enabled = false
-        vContract = {...CONTRACT};
+        vContract = null;
         bTooManyFish = false;
         bTriedDismantling = false;
         putinfishes = 0;
@@ -176,13 +185,13 @@ module.exports = function LetMeFish(mod) {
     function reset_fishing() {
         logMsg('INFO', "reset_fishing()");
 
-        if (vContract.id) {
-            logMsg('DEBG', "< C_CANCEL_CONTRACT.1:vContractId=" + vContract.id, {}, 1);
+        if (vContract) {
+            logMsg('DEBG', "< C_CANCEL_CONTRACT.1:vContractId=" + vContract.id, vContract, 1);
             mod.toServer('C_CANCEL_CONTRACT', 1, {
                 type: vContract.type,
                 id: vContract.id
             });
-            vContract = {...CONTRACT};
+            vContract = null;
         }
         if (enabled) {
             mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD) + 1000); // lets resume fishing
@@ -223,7 +232,7 @@ module.exports = function LetMeFish(mod) {
 
         if (baitId) {
             bTriedDismantling = false;
-            logMsg('DEBG', "< C_USE_ITEM.3:baitId", {}, 1);
+            logMsg('DEBG', "< C_USE_ITEM.3:baitId=", {"craftbait": craftId, "activebait": baitId}, 1);
             mod.toServer('C_USE_ITEM', 3, {
                 gameId: myGameId,
                 id: baitId,
@@ -272,11 +281,11 @@ module.exports = function LetMeFish(mod) {
 
                 if (fishList.length) {
                     logMsg('GAME', "Dismantling " + fishList.length + " fish.");
-                    if (vContract.id === null) {
+                    if (vContract === null) {
                         mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
                         logMsg('DEBG', "< C_REQUEST_CONTRACT.1:dismantle=?", {}, 1);
                     }
-                    mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) + 15000));
+                    mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) + 10000));
                 } else if (awaiting_dismantling <= 0) {
                     logMsg('GAME', "Cannot dismantle anything.");
                     stop_fishing();
@@ -300,7 +309,7 @@ module.exports = function LetMeFish(mod) {
     function add_fish_to_dismantler() {
         logMsg('INFO', "add_fish_to_dismantler()");
 
-        if (vContract.id !== null) {
+        if (vContract !== null) {
             if (vContract.type === dismantle_contract_type) {
                 const fish = fishList.pop();
                 if (fish) {
@@ -320,7 +329,7 @@ module.exports = function LetMeFish(mod) {
                 }
             } else {
                 logMsg('GAME', "No dismantle contract found, retrying.");
-                mod.setTimeout(cleanup_by_dismantle, (rng(ACTION_DELAY_FISH_START)+1500));
+                mod.setTimeout(cleanup_by_dismantle, (rng(ACTION_DELAY_FISH_START)+1000));
             }
         }
     }
@@ -329,7 +338,7 @@ module.exports = function LetMeFish(mod) {
     function start_dismantle() {
         logMsg('INFO', "start_dismantle()");
 
-        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContract.id, {}, 1);
+        logMsg('DEBG', "< C_RQ_COMMIT_DECOMPOSITION_CONTRACT.1:vContractId=" + vContract.id, vContract, 1);
         mod.toServer('C_RQ_COMMIT_DECOMPOSITION_CONTRACT', 1, {contract: vContract.id});
 
         mod.setTimeout(dismantle_batch, 1925);
@@ -356,11 +365,12 @@ module.exports = function LetMeFish(mod) {
     mod.hook('C_PLAYER_LOCATION', 5, event => {
         playerLoc = event;
     });
+
     mod.hook('S_LOGIN', mod.majorPatchVersion >= 86 ? 14 : 13, event => {
         myGameId = event.gameId;
         invenItems = [];
         rodId = null;
-        vContract = {...CONTRACT};
+        vContract = null;
         putinfishes = 0;
         settingsFileName = `./saves/${event.name}-${event.serverId}.json`;
         let lSettings = loadSettings();
@@ -454,8 +464,12 @@ module.exports = function LetMeFish(mod) {
 
         //Check the server response to C_RQ_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1
         Hook('S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT', 1, event => {
-            logMsg('INFO', "> S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1:success=" + event.success, event, 1);
-        })
+            if (vContract === null) return;
+
+            if (vContract.type === dismantle_contract_type) {
+                logMsg('INFO', "> S_RP_ADD_ITEM_TO_DECOMPOSITION_CONTRACT.1:success=" + event.success, event, 1);
+            }
+        });
 
         // branches to catch_the_fish AKA send(C_END_FISHING_MINIGAME.1)
         Hook('S_START_FISHING_MINIGAME', 1, event => {
@@ -510,8 +524,6 @@ module.exports = function LetMeFish(mod) {
             }
         });
 
-
-
         // branches to cleanup_by_dismantle
         if (mod.majorPatchVersion >= 85) {
             let invenItemsBuffer = [];
@@ -563,28 +575,32 @@ module.exports = function LetMeFish(mod) {
             logMsg('DEBG', '> S_REQUEST_CONTRACT.1:event.type=' + event.type, event, 1)
             if (!enabled || bWaitingForBite || event.senderId !== myGameId) return;
 
-            vContract.id = event.id;
-            vContract.type = event.type;
+            vContract = event;
 
             if (event.type === dismantle_contract_type) {
                 logMsg('DEBG', "Dismantle:ContractId=" + event.id, event, 2);
 
                 mod.clearAllTimeouts();
                 mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 2));
+            } else if (event.type === craft_contract_type) {
+                logMsg('DEBG', "Craft:ContractId=" + event.id, event, 2);
+
+                mod.clearAllTimeouts();
+                mod.setTimeout(craft_bait_start, (rng(ACTION_DELAY_FISH_START) / 2));
             } else {
-                vContract = {...CONTRACT};
+                vContract = null;
             }
         });
 
         // branches to throw_rod because the loop expects to cancel a dismantle contract, this needs to be refactored.
         Hook('S_CANCEL_CONTRACT', 1, event => {
+            if (vContract === null) return;
             if (!enabled || bWaitingForBite || event.id !== vContract.id || event.senderId !== myGameId) return;
 
-            if (event.type === dismantle_contract_type) {
+
+            if (event.type === dismantle_contract_type || event.type === craft_contract_type) {
                 logMsg("DEBG", "> S_CANCEL_CONTRACT.2:id=" + event.id, event, 1);
-
-                vContract = {...CONTRACT};
-
+                vContract = null;
                 logMsg('GAME', "Contract for dismantling cancelled (not by this mod), retrying fishing sequence...", event);
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD));
@@ -608,9 +624,8 @@ module.exports = function LetMeFish(mod) {
 
         Hook('S_END_PRODUCE', 1, event => {
             if (!enabled || bWaitingForBite) return;
-            logMsg("DEBG", "> S_END_PRODUCE.1:bCraftMore=True", event, 1)
-
             if (event.success) {
+                logMsg("DEBG", "> S_END_PRODUCE.1:bCraftMore=True", event, 1)
                 craft_bait_start(true);
             }
         });
@@ -625,27 +640,32 @@ module.exports = function LetMeFish(mod) {
                 mod.clearAllTimeouts();
                 mod.setTimeout(craft_bait_start, rng(ACTION_DELAY_FISH_START));
             } else if (msg.id === 'SMT_ITEM_CANT_POSSESS_MORE') {
-                if (vContract.id !== null) {
+                logMsg('DEBG', "> SMT_CAN'T_POSSESS", event, 1)
+                if (vContract) {
                     mod.clearAllTimeouts();
-                    let itemId = Number(msg.tokens.ItemName.substr(6));
-                    if (itemId >= 206006 && itemId <= 206009) {
-                        logMsg('GAME', "Max bait crafted, restarting fishing with worms.");
-                        baitId = itemId;
-                    } else {
-                        logMsg('GAME', "Max bait crafted, restarting fishing.");
+
+                    if (vContract.type === dismantle_contract_type) {
+                        logMsg('GAME', "You have reached the 10k dismantled fish parts limit, stopping.");
+                        if (putinfishes) {
+                            bTooManyFish = false;
+                            enabled = false;
+                            start_dismantle();
+                            mod.setTimeout(stop_fishing, (rng(ACTION_DELAY_FISH_START) + 4000));
+                        } else {
+                            stop_fishing();
+                        }
+                    } else if (vContract.type === craft_contract_type) {
+                        let itemId = Number(msg.tokens.ItemName.substr(6));
+                        if (itemId >= 206006 && itemId <= 206009) {
+                            logMsg('GAME', "Max bait crafted, restarting fishing with worms.");
+                            baitId = itemId;
+                        } else {
+                            logMsg('GAME', "Max bait crafted, restarting fishing.");
+                        }
+                        mod.setTimeout(use_bait_item, rng(ACTION_DELAY_FISH_START));
                     }
-                    mod.setTimeout(use_bait_item, rng(ACTION_DELAY_FISH_START));
                 } else {
-                    logMsg('GAME', "You have reached the 10k dismantled fish parts limit, stopping.");
-                    mod.clearAllTimeouts();
-                    if (putinfishes) {
-                        bTooManyFish = false;
-                        enabled = false;
-                        start_dismantle();
-                        setTimeout(stop_fishing, (rng(ACTION_DELAY_FISH_START) + 4000));
-                    } else {
-                        stop_fishing();
-                    }
+                    logMsg("If you got here, I'm not catching all the contracts I start!")
                 }
             } else if (msg.id === 'SMT_CANNOT_FISHING_FULL_INVEN') { // auto-dismantle entry.
                 logMsg('GAME', "Inventory full, dismantling.");
@@ -665,7 +685,7 @@ module.exports = function LetMeFish(mod) {
                 logMsg('GAME', "Fishing cancelled, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_FISH_START));
-            } else if (msg.id === 'SMT_YOU_ARE_BUSY' && vContract.id !== null) {
+            } else if (msg.id === 'SMT_YOU_ARE_BUSY' && vContract !== null) {
                 logMsg('GAME', "SMT_YOU_ARE_BUSY, retrying.");
                 mod.clearAllTimeouts();
                 mod.setTimeout(throw_rod, rng(ACTION_DELAY_THROW_ROD) + 3000);
@@ -677,7 +697,7 @@ module.exports = function LetMeFish(mod) {
         });
 
         // Utility hooks
-        // Anti-GM
+         // Anti-GM
         Hook('S_SPAWN_USER', 15, event => {
             if (event.gm && enabled) {
                 logMsg('GAME', "GM near you, temporarily stopping.", event);
@@ -687,13 +707,16 @@ module.exports = function LetMeFish(mod) {
             }
         });
 
-        // Stop fishing on tp.
+          // Stop fishing on tp.
         Hook('S_LOAD_TOPO', 3, () => {
             if (enabled) {
                 stop_fishing();
                 logMsg('GAME', "Teleported. AF stopped.");
             }
         });
+
+        // Nego hook
+        // AFK deny hook
     }
 
     // Helpers
@@ -788,7 +811,7 @@ module.exports = function LetMeFish(mod) {
 
     function jsonify(d) {
         var dat = {};
-        for (let key in d) {
+        for (let key of d) {
             switch(typeof d[key]) {
                 case "bigint": dat[key] = d[key].toString(16); break
                 default: dat[key] = d[key]; break
