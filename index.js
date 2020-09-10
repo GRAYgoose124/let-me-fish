@@ -48,10 +48,11 @@ const CONTRACT = {
 //     statFished: 0,
 // }
 
-// TODO: Re-add Auto-nego integration -- simply on a nego hook, stop fishing and start after nego max delay.
-// TODO: auto-buy palid for angler tokens
-// TODO: auto sell fillets & golds.
-// TODO: auto salad
+// TODO: Re-add Auto-nego integration -- simply on a nego hook, stop fishing and start after nego max delay. prio-min
+// TODO: auto-buy palid for angler tokens prio-min
+// TODO: auto sell fillets & golds. prio-mid
+// TODO: 10k fish hook -> don't dismantle, sell common fish - prio-high
+// TODO: auto salad prio-mid
 
 module.exports = function LetMeFish(mod) {
     const command = mod.command,
@@ -281,10 +282,21 @@ module.exports = function LetMeFish(mod) {
 
                 if (fishList.length) {
                     logMsg('GAME', "Dismantling " + fishList.length + " fish.");
+                    // duplicate code...really should make a fun cancelContract(type, id);
+                    if (vContract !== null && vContract.type !== dismantle_contract_type ) {
+                        logMsg('DEBG', "< C_CANCEL_CONTRACT.1:vContractId=" + vContract.id, vContract, 1);
+                        mod.toServer('C_CANCEL_CONTRACT', 1, {
+                            type: vContract.type,
+                            id: vContract.id
+                        });
+                        vContract = null;
+                    }
+
                     if (vContract === null) {
                         mod.toServer('C_REQUEST_CONTRACT', 1, {type: dismantle_contract_type});
                         logMsg('DEBG', "< C_REQUEST_CONTRACT.1:dismantle=?", {}, 1);
                     }
+
                     mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) + 10000));
                 } else if (awaiting_dismantling <= 0) {
                     logMsg('GAME', "Cannot dismantle anything.");
@@ -351,7 +363,7 @@ module.exports = function LetMeFish(mod) {
         awaiting_dismantling = -putinfishes;
         putinfishes = 0;
 
-        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContract.id});
+        mod.toServer('C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION', 1, {contract: vContract.id}); // Maybe proc at same time as C_RQ_COMMIT??
         logMsg('DEBG', "< C_RQ_START_SOCIAL_ON_PROGRESS_DECOMPOSITION.1:vContractId=" + vContract.id, fishList, 1);
 
         if (bTooManyFish) {
@@ -408,7 +420,7 @@ module.exports = function LetMeFish(mod) {
                     logMsg('CONT', "Autocraft recipe: ".concat((craftId ? craftId : "none"), "\n\tBait:\t", (baitId ? baitId : "none"),
                         "\n\tAutoDismantle CF=" + bDismantleFish + ", GF=" + bDismantleFishGold));
                 }
-                command.message("Throw your rod.");
+                command.message("Use some bait and throw your rod.");
             } else {
                 stop_fishing();
             }
@@ -584,9 +596,6 @@ module.exports = function LetMeFish(mod) {
                 mod.setTimeout(add_fish_to_dismantler, (rng(ACTION_DELAY_FISH_START) / 2));
             } else if (event.type === craft_contract_type) {
                 logMsg('DEBG', "Craft:ContractId=" + event.id, event, 2);
-
-                mod.clearAllTimeouts();
-                mod.setTimeout(craft_bait_start, (rng(ACTION_DELAY_FISH_START) / 2));
             } else {
                 vContract = null;
             }
@@ -645,7 +654,7 @@ module.exports = function LetMeFish(mod) {
                     mod.clearAllTimeouts();
 
                     if (vContract.type === dismantle_contract_type) {
-                        logMsg('GAME', "You have reached the 10k dismantled fish parts limit, stopping.");
+                        logMsg('GAME', "You have reached the 10k dismantled fish parts limit, stopping."); // TODO: Auto-sell
                         if (putinfishes) {
                             bTooManyFish = false;
                             enabled = false;
@@ -791,18 +800,17 @@ module.exports = function LetMeFish(mod) {
         if (debugLevel >= lvl) {
             var dat = {};
 
-            if (typeof data !== 'undefined') {
-                dat = jsonify(data);
-            }
-
             try {
+                if (typeof data !== "undefined" && data.constructor === Object && data.keys !== "undefined") {
+                    dat = jsonify(data);
+                }
                 if (dat.length) {
                     logStr = "[".concat(level, "]: ", logStr, str, "\n", logStr, "\t", debugLevel>=4?JSON.stringify(dat, null, "    ".repeat(indent)):"");
                 } else {
                     logStr = "[".concat(level, "]: ", logStr, str);
                 }
             } catch (e) {
-                logStr = "[JSON] ".concat(logStr, e, '\n', str);
+                logStr = "[JSON] ".concat(logStr, '\nErr: ', e, '\nstr: ', str, '\ndata: ', data);
             }
 
             console.log(logStr);
@@ -811,12 +819,14 @@ module.exports = function LetMeFish(mod) {
 
     function jsonify(d) {
         var dat = {};
-        for (let key of d) {
+
+        for (let key in d) {
             switch(typeof d[key]) {
                 case "bigint": dat[key] = d[key].toString(16); break
                 default: dat[key] = d[key]; break
             }
         }
+
         return dat;
     }
 
