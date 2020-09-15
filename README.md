@@ -1,3 +1,7 @@
+##!!This version had patched the correct fishing pattern but as of 9/14/20 Tera patch NA98.02 has broken most ops and defs. So we need to wait on tera-data to have their opcode list updated and then patch the 7 or so FISHING defs they do not provide. !!
+
+
+------------
 <img src=http://u.cubeupload.com/Owyn/lemmefish.jpg>
 
 # Let-me-Fish
